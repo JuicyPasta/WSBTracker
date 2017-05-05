@@ -1,0 +1,22 @@
+{
+  "name": "WSBTracker",
+  "version": "0.0.0",
+  "description": "Stock trading portfolio managed by r/wallstreetbets Edit",
+  "main": "Add topics",
+  "dependencies": {
+    "express": "~4.15.2"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "make test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JuicyPasta/WSBTracker"
+  },
+  "author": "",
+  "license": "BSD-2-Clause",
+  "bugs": {
+    "url": "https://github.com/JuicyPasta/WSBTracker/issues"
+  }
+}
