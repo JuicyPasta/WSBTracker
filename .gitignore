@@ -29,4 +29,5 @@ npm-debug.log
 # Dependency directory
 node_modules
 
-
+# Secret files
+# secrets # UNCOMMENT WHEN YOU MAKE THE REPO PUBLIC
