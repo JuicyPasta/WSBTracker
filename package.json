@@ -5,6 +5,7 @@
   "main": "Add topics",
   "dependencies": {
     "express": "~4.15.2",
+    "feedparser": "^2.2.0",
     "reddit-oauth": "^1.1.1",
     "request": "^2.81.0"
   },
