@@ -4,6 +4,7 @@
   "description": "Stock trading portfolio managed by r/wallstreetbets Edit",
   "main": "Add topics",
   "dependencies": {
+    "async": "^2.4.0",
     "express": "~4.15.2",
     "feedparser": "^2.2.0",
     "reddit-oauth": "^1.1.1",
