@@ -35,18 +35,13 @@ function get_token(cb) {
 // assumes the last argument is a callback
 function retry_wrapper(numRetries, func) {
     return function()  {
-        /*
-        var parentCallback = arguments[arguments.length-1];
-
+        /* var parentCallback = arguments[arguments.length-1];
         var tempArgs = []
         for (var i = 0; i < arguments.length; i++) {
-
         }
         for (var i = 0; i < numRetries; i++) {
-
             func.apply(this, arguments)
-        }
-        */
+        } */
 
         func.apply(this, arguments);
     }
@@ -57,13 +52,9 @@ function retry_wrapper(numRetries, func) {
  * API DOCS: https://www.reddit.com/dev/api#GET_subreddits_new
  * 
  * endpoint: endpoint listed on reddit api website, ex: /api/v1/me
- * http_method: get/post
  * data: json data to send to the api endpoint 
  * cb(err, response)
  */
-// TODO: fix user agent
-// TODO: support post requests
-// TODO: add retry logic
 var _post_api = function(endpoint, data, cb) {
     get_token(function (err, token) {
         if (err) return cb(err)
@@ -111,60 +102,111 @@ var get_api = retry_wrapper(4, _get_api)
 
 
 function get_comments(subreddit, num_comments, cb) {
-    _get_comments(subreddit, num_comments, 0, '', [], cb)
+    _get_comments(subreddit, num_comments, 0, null, null, '', [], cb)
+}
+
+function get_comments_until_id(subreddit, num_comments, target_id, cb) {
+    _get_comments(subreddit, num_comments, 0, target_id, null, '', [], cb)
+}
+
+// posted_after is epoch time in seconds
+function get_comments_after_time(subreddit, num_comments, posted_after, cb) {
+    _get_comments(subreddit, num_comments, 0, null, posted_after, '', [], cb)
 }
 
 
 // TODO: Wrap recursive function in backoff retries
-// TODO: possible change, dont store the comments in a huge array, instead trigger the callback as you go
-function _get_comments(subreddit, count_left, count, after, comments, cb) {
-    if (count_left <= 0) {
+function _get_comments(subreddit, count_left, count, target_id, posted_after, next_page_id, comments, cb) {
+    if (count_left <= 0 && !target_id) {
         return cb(null, comments)
+    } else if (count_left <= 0 && target_id) {
+        return cb("Target comment name not found", comments)
     }
 
     request({
         url: 'http://reddit.com/r/' + subreddit + '/comments.json',
-        qs: {
-            count: count,
-            after: after
-        }
+        qs: { count: count, after: next_page_id }
     }, 
-    function(err, res, body) {
+    function(err, res, body_json) {
         if (err) return cb(err)
-        var body_obj = JSON.parse(body)
+
+        var body_obj = JSON.parse(body_json)
         var comments_retrieved = body_obj.data.children
         var comments_retrieved_len = body_obj.data.children.length
 
         if (comments_retrieved_len <= 0) {
-            return cb("No more comments to be retrieved", comments)
+            return cb("Reached a page with no comments", comments)
         }
 
         if (comments_retrieved_len > count_left) {
-            comments_retrieved = comments_retrieved.slice(0, count_left)
             comments_retrieved_len = count_left
+            comments_retrieved = comments_retrieved.slice(0, comments_retrieved_len)
         }
 
+        // handles posted_after - only show posts that were posted after a specific time
+        if (posted_after) {
+            for (var i = 0; i < comments_retrieved_len; i++) {
+                if (comments_retrieved[i].data.created_utc <= posted_after) {
+                    // we only care about the comments before and we are done looking
+                    comments_retrieved_len = i; 
+                    comments_retrieved = comments_retrieved.slice(0, comments_retrieved_len)
+
+                    // done searching but we want to handle the target_id case
+                    count_left = -1;
+                }
+            }
+        }
+
+        // handles target_id - stops when we reach a specific comment
+        if (target_id) {
+            for (var i = 0; i < comments_retrieved_len; i++) {
+                // found the comment we are looking up to
+                if (comments_retrieved[i].data.id == target_id) {
+                    // we only care about the comments before and we are done looking
+                    comments_retrieved_len = i; 
+                    comments_retrieved = comments_retrieved.slice(0, comments_retrieved_len)
+                    return cb(null, comments.concat(comments_retrieved))
+                }
+            }
+        }
+ 
         // recursive call
         _get_comments(
             subreddit, 
             count_left - comments_retrieved_len, 
             count + comments_retrieved_len, 
+            target_id,
+            posted_after,
             body_obj.data.after, 
             comments.concat(comments_retrieved), 
             cb)
-        
     })
-
 }
 
 
 // BASIC COMMENT EMITTER
 // ONLY EMITS SINGLE COMMENTS, RUNS FOREVVERRR
-function _comment_emitter(subreddit, comment_depth, pause, cb) {
-    
+function comment_emitter(subreddit, comment_depth, wait_interval, cb) {
+    var start_time = Date.now() / 1000 - 100
+    var most_recent_comment_id = null
 
+    let interval = setInterval(() => {
+        _get_comments(subreddit, comment_depth, 0, most_recent_comment_id, start_time, '', [], function(err, comments) {
+            if (comments.length > 0) {
+                most_recent_comment_id = comments[0].data.id
+            }
+
+            comments.map(function(comment) {
+                cb(null, comment)
+            })
+
+        })
+    }, wait_interval)
 }
 
+comment_emitter("wallstreetbets", 1, 1000, function(err, comment) {
+    console.log(comment)
+})
 
 // TESTS
 /*
@@ -179,10 +221,29 @@ post_api("api/search_reddit_names", {exact:true, query:'wallstreetbets'}, functi
 }) 
 
 get_comments('wallstreetbets', 914, function(err, data) {
-    console.log(err)
-    console.log(data.length) // SHOULD BE 914
+    //console.log(err)
+    //console.log(data.length) // SHOULD BE 914
 })
+
+get_comments_after_time("wallstreetbets", 1000, Date.now()/1000 - 100, function(err, comments) {
+    console.log(err)
+    console.log(comments.length)
+    comments.map(function(data) {
+        console.log(data.data.id)
+    })
+})
+
+get_comments_until_id("wallstreetbets", 1000, "dh7vz0r", function(err, comments) {
+    console.log(err)
+    console.log(comments.length)
+    comments.map(function(data) {
+        console.log(data.data.id)
+    })
+})
+
 */
+
+
 
 
 
