@@ -186,10 +186,14 @@ function _get_comments(subreddit, count_left, count, target_id, posted_after, ne
 
 // BASIC COMMENT EMITTER
 // ONLY EMITS SINGLE COMMENTS, RUNS FOREVVERRR
-function comment_emitter(subreddit, comment_depth, wait_interval, cb) {
-    var start_time = Date.now() / 1000 - 100
-    var most_recent_comment_id = null
 
+
+// adjust comment_dept and wait_interval to match what your hardware is capable of, 
+// having a really low wait interval and high comment depth will not cause additional strain if you can handle the amount of comments a subreddit is producing
+function comment_emitter(subreddit, comment_depth, wait_interval, seconds_back, cb) {
+    var start_time = Date.now() / 1000 - seconds_back
+    var most_recent_id_queue = [true]
+    
     let interval = setInterval(() => {
         _get_comments(subreddit, comment_depth, 0, most_recent_comment_id, start_time, '', [], function(err, comments) {
             if (comments.length > 0) {
@@ -204,8 +208,12 @@ function comment_emitter(subreddit, comment_depth, wait_interval, cb) {
     }, wait_interval)
 }
 
-comment_emitter("wallstreetbets", 1, 1000, function(err, comment) {
-    console.log(comment)
+function default_comment_emitter(subreddit, cb) {
+    comment_emitter(subreddit, 1000, 1000, 0, cb)
+}
+
+comment_emitter("all", 1000, 10, 0, function(err, comment) {
+    console.log(comment.data.id)
 })
 
 // TESTS
@@ -245,14 +253,6 @@ get_comments_until_id("wallstreetbets", 1000, "dh7vz0r", function(err, comments)
 
 
 
-
-
-
-
-// main way to subscribe to a subreddit 
-// basically a giant event emitter...
-
-
 /*
 config_options = {
     subreddit: string
@@ -275,7 +275,3 @@ config_options = {
  * newHot (with page limits ex: only look at 2 pages)
  * 
  */
-
-
-var seenQueue = []
-
