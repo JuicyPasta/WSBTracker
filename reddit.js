@@ -105,18 +105,10 @@ function get_comments(subreddit, num_comments, cb) {
     _get_comments(subreddit, num_comments, 0, null, null, '', [], cb)
 }
 
-function get_comments_until_id(subreddit, num_comments, target_id, cb) {
-    _get_comments(subreddit, num_comments, 0, target_id, null, '', [], cb)
-}
-
-// posted_after is epoch time in seconds
-function get_comments_after_time(subreddit, num_comments, posted_after, cb) {
-    _get_comments(subreddit, num_comments, 0, null, posted_after, '', [], cb)
-}
-
 
 // TODO: Wrap recursive function in backoff retries
-function _get_comments(subreddit, count_left, count, target_id, posted_after, next_page_id, comments, cb) {
+/*
+function _get_comments(subreddit, count_left, count, target_id, posted_after, next_page_id, comments, cb, cb_init) {
     if (count_left <= 0 && !target_id) {
         return cb(null, comments)
     } else if (count_left <= 0 && target_id) {
@@ -131,8 +123,14 @@ function _get_comments(subreddit, count_left, count, target_id, posted_after, ne
         if (err) return cb(err)
 
         var body_obj = JSON.parse(body_json)
+
+        if (!next_page_id && cb_init) {
+            cb_init(body_obj.data.children[0])
+        }
+
         var comments_retrieved = body_obj.data.children
         var comments_retrieved_len = body_obj.data.children.length
+        console.log(comments_retrieved_len)
 
         if (comments_retrieved_len <= 0) {
             return cb("Reached a page with no comments", comments)
@@ -182,40 +180,166 @@ function _get_comments(subreddit, count_left, count, target_id, posted_after, ne
             cb)
     })
 }
+*/
 
+function _get_comments(subreddit, after_name, until_name, cb, cb_first_item) {
+    request({
+        url: 'http://reddit.com/r/' + subreddit + '/comments.json',
+        qs: { after: after_name }
+    }, function (err, res, body_json) {
+        if (err) return cb(err)
+
+        var body = JSON.parse(body_json)
+        var children = body.data.children
+
+        if (children.length > 0) {
+            if (!after_name) {
+                cb_first_item(children[0].data.name)
+                console.log(children[0].data.name + " - " + until_name)
+            }
+
+            after_name = children[children.length-1].data.name
+            var is_done = false
+
+            for (var i = 0; i < children.length; i++) {
+                // found the comment we are looking up to
+                if (children[i].data.name == until_name) {
+                    // we only care about the comments before and we are done looking
+                    children = children.slice(0, i)
+
+                    is_done = true
+                    break
+                }
+            }
+
+            if (!is_done && until_name) _get_comments(subreddit, after_name, until_name, cb, cb_first_item)
+
+            if (until_name) {
+                children.map(function(comment) {
+                    cb(null, comment)
+                })
+            } 
+        } 
+    })
+}
+
+function _concurrent_comment_emitter(subreddit, wait_interval, until_name, cb) {
+    setTimeout(function() {
+        _get_comments(subreddit, '', until_name, cb, function(first_comment_retrieved) {
+            _concurrent_comment_emitter(subreddit, wait_interval, first_comment_retrieved, cb)
+        })
+
+    }, wait_interval)
+}
+
+_concurrent_comment_emitter('wallstreetbets', 0000, '', function(err, comment) {
+    //console.log(err)
+    console.log(comment.data.author)
+    //console.log(data.length) // SHOULD BE 914
+})
 
 // BASIC COMMENT EMITTER
 // ONLY EMITS SINGLE COMMENTS, RUNS FOREVVERRR
 
 
+/*
+function concurrent_comment_emitter(subreddit, cb) {
+    _concurrent_comment_emitter(subreddit, 0, cb)
+}
+*/
+
+
+
+
 // adjust comment_dept and wait_interval to match what your hardware is capable of, 
 // having a really low wait interval and high comment depth will not cause additional strain if you can handle the amount of comments a subreddit is producing
-function comment_emitter(subreddit, comment_depth, wait_interval, seconds_back, cb) {
-    var start_time = Date.now() / 1000 - seconds_back
-    var most_recent_id_queue = [true]
-    
-    let interval = setInterval(() => {
-        _get_comments(subreddit, comment_depth, 0, most_recent_comment_id, start_time, '', [], function(err, comments) {
-            if (comments.length > 0) {
-                most_recent_comment_id = comments[0].data.id
+
+// comment_depth = 1000
+
+// POSSIBLE ERROR: not enough bandwidth to load comments as fast as they are being posted
+// you can fix this by lowering the wait_interval which will increase the degree of multiprogramming (more threads) 
+
+
+//function _get_comments(subreddit, count_left, count, target_id, posted_after, next_page_id, comments, cb, cb_init) {
+
+
+/*
+function _concurrent_comment_emitter(subreddit, first_call, wait_interval, most_recent_name, stop_at_name, cb, cb_first_item) {
+    console.log('requesting before: ' + most_recent_name)
+
+    var terminated = false
+    request({
+        url: 'http://reddit.com/r/' + subreddit + '/comments.json',
+        qs: { before: most_recent_name }
+    }, function (err, res, body_json) {
+        if (err) return cb(err)
+
+        var body = JSON.parse(body_json)
+        var children = body.data.children
+
+        if (children.length > 0) {
+            if (!most_recent_name) {
+                cb_first_item(children[children.length-1].data.name)
             }
 
-            comments.map(function(comment) {
-                cb(null, comment)
-            })
+            most_recent_name = children[0].data.name
 
-        })
-    }, wait_interval)
+            // first call is a boolean that says if the helper method called this function
+            if (!first_call) {
+                for (var i = 0; i < children.length; i++) {
+                    if (children[i].data.name == stop_at_name) {
+                        console.log("slicing")
+                        children = children.slice(i+1, children.length)
+                        // WERE DONE STOP
+                        terminated = true
+                    }
+                }
+
+                children.map(function(comment) {
+                    cb(null, comment)
+                })
+            }
+        } else {
+            // this could mean 2 things.......
+            terminated = true
+        }
+
+
+
+        //wait_interval += body.data.children.length > 0 ? -100 : 100
+        //wait_interval = wait_interval < 5000 ? 5000 : wait_interval
+
+        // if the wait_interval gets too far in the negative, we need to start another _comment_emitter thread so we dont get too 
+        // far behind reddit bc they stop supporting the before query after a certain amount of time
+
+        // the current thread needs to stop where the new thread stops. 
+
+        if (wait_interval < -500) {
+            //start new comment_emitter, get the first item it reads and set the current threads stop time to that
+            // 
+
+
+        }
+
+
+        console.log('==== ' + wait_interval)
+        console.log('==== ' + body.data.children.length)
+
+        setTimeout(function() {
+            _comment_emitter(subreddit, wait_interval, most_recent_name, stop_at_name, cb)
+        }, wait_interval)
+    })
 }
 
-function default_comment_emitter(subreddit, cb) {
-    comment_emitter(subreddit, 1000, 1000, 0, cb)
+function comment_emitter(subreddit, cb) {
+    _comment_emitter(subreddit, 0, null, cb)
 }
 
-comment_emitter("all", 1000, 10, 0, function(err, comment) {
+comment_emitter("all", function(err, comment) {
     console.log(comment.data.id)
 })
 
+*/
 // TESTS
 /*
 get_api("user/juicypasta/comments", {type:'links', limit: 1}, function(err, data) {
